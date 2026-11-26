@@ -1,6 +1,8 @@
 <!-- mcp-name: io.github.kumar-miskin/apiverify -->
 # apiverify
 
+[![kumar-miskin/apiverify MCP server](https://glama.ai/mcp/servers/kumar-miskin/apiverify/badges/score.svg)](https://glama.ai/mcp/servers/kumar-miskin/apiverify)
+
 > **Status: 0.1.2 fixes the wrong answers that independent evaluations found in 0.1.0 and 0.1.1.** A final
 > independent retest of the supported syntax boundary passed on 69 synthetic cases (42 decisive and correct,
 > 27 abstained, 0 wrong). That is not proof of broad reliability: on real libraries it abstained on about 49% of
