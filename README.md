@@ -67,6 +67,16 @@ positives, 0 false negatives, 442 abstentions (all flask, mostly names re-export
 from werkzeug/jinja2, which live outside the flask artifact), 2 instance attributes
 not scored.
 
+## Supported syntax boundary (a static checker, not a Python interpreter)
+
+`verified` / `not_found` are only returned for plain module-level code: `def`, `class`, simple assignments,
+`import` / `from ... import` (including relative and star imports inside the same artifact), plain-name
+base classes, `Class.attr = value` at module level, and literal `__slots__`. Anything else that could add,
+remove or hide a name gives `cannot_verify`: conditional definitions (version/platform/feature checks, unless
+both branches define it), `TYPE_CHECKING`-only names, `del`, class or alias rebinding, class decorators,
+metaclasses, `__getattr__`, `globals()`/`exec`/`eval`/`setattr`, loops that assign attributes, and external
+base classes or re-exports. It cannot see another module patching the class at import time.
+
 ## Limits
 
 - Python on PyPI only. No JavaScript, Rust or Go yet.

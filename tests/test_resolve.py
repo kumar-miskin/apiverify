@@ -239,6 +239,21 @@ class Regressions(unittest.TestCase):
         for src, sym, want in cases:
             self.assertEqual(self.run1(src, sym).status, want, src)
 
+    def test_retest2_cases(self):
+        cases = [
+            ("class A: pass\nclass B: pass\nAl=A\nAl=B\nAl.x=1\n", "pk.A.x", "cannot_verify"),
+            ("class A: pass\nclass B: pass\nAl=A\nAl=B\nAl.x=1\n", "pk.B.x", "cannot_verify"),
+            ("import sys\nclass A: pass\nif sys.platform=='win32':\n    Al=A\nelse:\n    Al=object\nAl.y=1\n", "pk.A.y", "cannot_verify"),
+            ("class A: pass\nB=A\nC=B\nC.z=1\n", "pk.A.z", "verified"),
+            ("class A: pass\nA.y: int\n", "pk.A.y", "not_found"),
+            ("class A:\n    x=1\nclass A:\n    y=1\n", "pk.A.x", "cannot_verify"),
+            ("class A: pass\nA.a, A.b = 1, 2\n", "pk.A.b", "verified"),
+            ("class A:\n    x=1\nAl=A\ndel Al.x\n", "pk.A.x", "cannot_verify"),
+            ("class A: pass\nfor A.k in (1,):\n    pass\n", "pk.A.k", "cannot_verify"),
+        ]
+        for src, sym, want in cases:
+            self.assertEqual(self.run1(src, sym).status, want, src)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -228,6 +228,9 @@ def lookup_module(ctx, modname, rest, depth=0, seen=None):
         if isinstance(n, ast.ClassDef) and n.name == name:
             if not tail:
                 return Found("class", path, n.lineno, n, modname)
+            if _bind_count(flat, name) > 1:
+                unknown.append(f"{name} is bound more than once in {modname} (redefined or rebound)")
+                continue
             r = lookup_class(ctx, modname, is_pkg, n, tail, depth + 1, seen)
             if r is not None:
                 return r
@@ -347,15 +350,48 @@ def _class_members(cls):
     return out, cond, deleted
 
 
+def _flatten_targets(t):
+    if isinstance(t, (ast.Tuple, ast.List)):
+        for e in t.elts:
+            yield from _flatten_targets(e)
+    elif isinstance(t, ast.Starred):
+        yield from _flatten_targets(t.value)
+    else:
+        yield t
+
+
 def _store_targets(n):
+    raw = []
     if isinstance(n, ast.Assign):
-        return list(n.targets)
-    if isinstance(n, (ast.AnnAssign, ast.AugAssign)):
-        return [n.target]
-    return []
+        raw = list(n.targets)
+    elif isinstance(n, ast.AnnAssign):
+        raw = [n.target] if n.value is not None else []   # `A.x: int` alone assigns nothing
+    elif isinstance(n, ast.AugAssign):
+        raw = [n.target]
+    elif isinstance(n, (ast.For, ast.AsyncFor)):
+        raw = [n.target]
+    elif isinstance(n, (ast.With, ast.AsyncWith)):
+        raw = [i.optional_vars for i in n.items if i.optional_vars is not None]
+    out = []
+    for t in raw:
+        out.extend(_flatten_targets(t))
+    return out
+
+
+def _delete_targets(n):
+    out = []
+    for t in n.targets:
+        out.extend(_flatten_targets(t))
+    return out
+
+
+def _bind_count(flat, name):
+    return sum(1 for n in flat if not isinstance(n, (ast.If, ast.Try, ast.With)) and name in _bound_names([n]))
 
 
 def _aliases(tree, clsname):
+    """Names assigned (directly or via other aliases) from the class name. Returns (names, unstable):
+    unstable aliases are bound more than once, conditionally, or somewhere other than module scope."""
     names = {clsname}
     changed = True
     while changed:
@@ -365,7 +401,19 @@ def _aliases(tree, clsname):
                 for t in n.targets:
                     if isinstance(t, ast.Name) and t.id not in names:
                         names.add(t.id); changed = True
-    return names
+    flat = list(_flat(tree.body))
+    stores = {}
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store):
+            stores[n.id] = stores.get(n.id, 0) + 1
+        elif isinstance(n, ast.arg):
+            stores[n.arg] = stores.get(n.arg, 0) + 1
+    unstable = set()
+    for a in names - {clsname}:
+        top = [n for n in flat if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == a for t in n.targets)]
+        if stores.get(a, 0) != 1 or len(top) != 1 or getattr(top[0], "_cond", False):
+            unstable.add(a)
+    return names, unstable
 
 
 _OBJECT_MEMBERS = set(dir(object)) | {"__dict__", "__module__", "__weakref__", "__qualname__", "__name__",
@@ -398,10 +446,10 @@ def lookup_class(ctx, modname, is_pkg, cls, rest, depth, seen):
         return None
     mm = ctx.load(modname)
     if mm is not None:
-        names = _aliases(mm[2], cls.name)
+        names, _unst = _aliases(mm[2], cls.name)
         for n in ast.walk(mm[2]):
             if isinstance(n, ast.Delete):
-                for t in n.targets:
+                for t in _delete_targets(n):
                     if isinstance(t, ast.Attribute) and isinstance(t.value, ast.Name) and t.value.id in names and t.attr == name:
                         ctx.flags.append(f"{cls.name}.{name} is deleted with del at line {n.lineno}")
                         return None
@@ -442,20 +490,23 @@ def lookup_class(ctx, modname, is_pkg, cls, rest, depth, seen):
             ctx.flags.append(f"class {cls.name} has decorator @{'.'.join(dd)} which may generate members")
     m = ctx.load(modname)
     if m is not None:
-        names = _aliases(m[2], cls.name)
+        names, unstable = _aliases(m[2], cls.name)
+        for a in sorted(unstable):
+            ctx.flags.append(f"alias {a} of class {cls.name} is rebound or conditional; mutations through it cannot be tracked")
         for n in _flat(m[2].body):
             for t in _store_targets(n):
                 if isinstance(t, ast.Attribute) and isinstance(t.value, ast.Name) and t.value.id in names and t.attr == name and not tail:
                     if getattr(n, "_cond", False):
                         ctx.flags.append(f"{cls.name}.{name} is assigned conditionally at line {n.lineno}")
+                    elif t.value.id in unstable:
+                        ctx.flags.append(f"{cls.name}.{name} is assigned through an unstable alias at line {n.lineno}")
                     else:
                         return Found("class attribute (assigned after class body)", path, n.lineno, None, modname, {"cls": cls.name})
         for n in ast.walk(m[2]):
-            if isinstance(n, (ast.Assign, ast.AugAssign, ast.AnnAssign)):
-                for t in _store_targets(n):
-                    if isinstance(t, ast.Attribute) and isinstance(t.value, ast.Name) and t.value.id in names and t.attr == name:
-                        ctx.flags.append(f"{cls.name}.{name} is assigned at line {n.lineno} outside the class body")
-            elif isinstance(n, ast.Call):
+            for t in _store_targets(n):
+                if isinstance(t, ast.Attribute) and isinstance(t.value, ast.Name) and t.value.id in names and t.attr == name:
+                    ctx.flags.append(f"{cls.name}.{name} is assigned at line {n.lineno} outside the class body")
+            if isinstance(n, ast.Call):
                 fn = _dotted(n.func)
                 if fn in (["setattr"], ["type", "__setattr__"]) and n.args and isinstance(n.args[0], ast.Name) and n.args[0].id in names:
                     ctx.flags.append(f"setattr on class {cls.name} (members may be added dynamically)")
