@@ -1,11 +1,11 @@
 # Distribution status and first-user plan
 
 ## Shipped (verified 2026-11-26)
-Latest is 0.1.1 (fixes for the wrong answers found in 0.1.0; independent re-test pending). 0.1.0 is marked deprecated in the MCP registry. Do not promote until 0.1.1 passes independent re-test.
+Latest is 0.1.2 (independent retest of its tested static boundary passed; see README for limits). 0.1.0 is marked deprecated in the MCP registry. Do not promote until 0.1.1 passes independent re-test.
 
 - GitHub (public, MIT): https://github.com/kumar-miskin/apiverify
-- PyPI: https://pypi.org/project/apiverify/0.1.1/  (`pip install apiverify`; MCP: `uvx --from apiverify apiverify-mcp`; if uv reports no matching version right after a release, add `--no-cache`)
-- Official MCP registry: `io.github.kumar-miskin/apiverify` v0.1.1 active and latest; v0.1.0 deprecated
+- PyPI: https://pypi.org/project/apiverify/0.1.2/  (`pip install apiverify`; MCP: `uvx --from apiverify apiverify-mcp`; if uv reports no matching version right after a release, add `--no-cache`)
+- Official MCP registry: `io.github.kumar-miskin/apiverify` v0.1.2 active and latest; v0.1.0 deprecated
   (`curl 'https://registry.modelcontextprotocol.io/v0/servers?search=apiverify'`)
 
 Being listed is not agent selection. Agents only call tools that are in their config or

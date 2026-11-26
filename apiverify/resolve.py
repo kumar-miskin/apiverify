@@ -652,10 +652,13 @@ def verify_symbol(symbol, version="latest", package=None, kwargs=None, _root=Non
             res.status = "cannot_verify"
         else:
             res.status = "not_found"
-            res.reason = f"no definition, import, or submodule named '{parts[-1]}' on that path in {package}=={res.version}"
+            res.reason = (f"no definition, import, or submodule named '{parts[-1]}' on that path in {package}=={res.version}"
+                          " (source-only result under the supported syntax boundary; not a runtime guarantee)")
         return res
     res.status = "verified"
     res.kind = found.kind
+    if found.kind == "instance attribute":
+        res.notes.append("assigned on self inside a method: an instance attribute, not necessarily present on the class itself")
     rel = os.path.relpath(found.path, base)
     res.location = {"file": rel, "line": found.line}
     if "inherited_from" in found.extra:

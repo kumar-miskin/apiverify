@@ -10,7 +10,7 @@ TOOL = {
     "description": (
         "Check whether a Python class, function, method or attribute exists in an EXACT released version of a PyPI package, "
         "by reading that version's published source. Returns status verified (with file, line, signature, deprecation signals), "
-        "not_found (only when every lookup path was followed), or cannot_verify (dynamic or external code; do not assume either way). "
+        "not_found (the name is absent from the release's SOURCE under a limited static syntax boundary; this is not a runtime guarantee), or cannot_verify (dynamic, conditional or external code; do not assume either way). A verified 'instance attribute' is set on self in a method, not necessarily a class attribute. "
         "Use before writing code that calls a library API you are not certain about for the project's pinned version."
     ),
     "inputSchema": {
