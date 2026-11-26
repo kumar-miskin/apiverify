@@ -225,6 +225,20 @@ class Regressions(unittest.TestCase):
         self.assertIn("symbol", txt)
         self.assertNotIn("KeyError", txt)
 
+    def test_retest_cases(self):
+        C = "class A:\n    pass\n"
+        cases = [
+            ("import sys\nclass A: pass\nif sys.platform=='win32':\n    A.w=1\n", "pk.A.w", "cannot_verify"),
+            ("class A:\n    x=1\ndel A.x\n", "pk.A.x", "cannot_verify"),
+            ("class A: pass\nAlias=A\nAlias.viaalias=1\n", "pk.A.viaalias", "verified"),
+            ("class A:\n    __slots__=('s',)\n", "pk.A.s", "verified"),
+            ("class A:\n    __slots__=('s',)\n", "pk.A.t", "not_found"),
+            ("class A:\n    __slots__=tuple('ab')\n", "pk.A.a", "cannot_verify"),
+            ("class A: pass\nclass B: pass\nB.later=1\n", "pk.A.later", "not_found"),
+        ]
+        for src, sym, want in cases:
+            self.assertEqual(self.run1(src, sym).status, want, src)
+
 
 if __name__ == "__main__":
     unittest.main()

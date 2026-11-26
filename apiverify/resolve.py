@@ -347,6 +347,27 @@ def _class_members(cls):
     return out, cond, deleted
 
 
+def _store_targets(n):
+    if isinstance(n, ast.Assign):
+        return list(n.targets)
+    if isinstance(n, (ast.AnnAssign, ast.AugAssign)):
+        return [n.target]
+    return []
+
+
+def _aliases(tree, clsname):
+    names = {clsname}
+    changed = True
+    while changed:
+        changed = False
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Assign) and isinstance(n.value, ast.Name) and n.value.id in names:
+                for t in n.targets:
+                    if isinstance(t, ast.Name) and t.id not in names:
+                        names.add(t.id); changed = True
+    return names
+
+
 _OBJECT_MEMBERS = set(dir(object)) | {"__dict__", "__module__", "__weakref__", "__qualname__", "__name__",
                                       "__mro__", "__bases__", "__subclasses__", "__annotations__"}
 _HARMLESS_CLASS_DECORATORS = {"final", "runtime_checkable", "type_check_only"}
@@ -375,6 +396,25 @@ def lookup_class(ctx, modname, is_pkg, cls, rest, depth, seen):
     if name in deleted:
         ctx.flags.append(f"{name} is deleted in class {cls.name}")
         return None
+    mm = ctx.load(modname)
+    if mm is not None:
+        names = _aliases(mm[2], cls.name)
+        for n in ast.walk(mm[2]):
+            if isinstance(n, ast.Delete):
+                for t in n.targets:
+                    if isinstance(t, ast.Attribute) and isinstance(t.value, ast.Name) and t.value.id in names and t.attr == name:
+                        ctx.flags.append(f"{cls.name}.{name} is deleted with del at line {n.lineno}")
+                        return None
+    if "__slots__" in members and members["__slots__"][0] == "variable":
+        sv = getattr(members["__slots__"][1], "value", None)
+        try:
+            slots = ast.literal_eval(sv)
+            slots = [slots] if isinstance(slots, str) else list(slots)
+        except Exception:
+            slots = None
+            ctx.flags.append(f"class {cls.name} has a __slots__ that is not a literal")
+        if slots is not None and name in slots and not tail:
+            return Found("slot", path, members["__slots__"][1].lineno, None, modname, {"cls": cls.name})
     if name in members and name not in condmem:
         kind, node = members[name]
         if tail:
@@ -402,21 +442,23 @@ def lookup_class(ctx, modname, is_pkg, cls, rest, depth, seen):
             ctx.flags.append(f"class {cls.name} has decorator @{'.'.join(dd)} which may generate members")
     m = ctx.load(modname)
     if m is not None:
+        names = _aliases(m[2], cls.name)
         for n in _flat(m[2].body):
-            for t in ([n.target] if isinstance(n, (ast.AnnAssign, ast.AugAssign)) else (n.targets if isinstance(n, ast.Assign) else [])):
-                if isinstance(t, ast.Attribute) and isinstance(t.value, ast.Name) and t.value.id == cls.name and t.attr == name and not tail:
-                    return Found("class attribute (assigned after class body)", path, n.lineno, None, modname, {"cls": cls.name})
+            for t in _store_targets(n):
+                if isinstance(t, ast.Attribute) and isinstance(t.value, ast.Name) and t.value.id in names and t.attr == name and not tail:
+                    if getattr(n, "_cond", False):
+                        ctx.flags.append(f"{cls.name}.{name} is assigned conditionally at line {n.lineno}")
+                    else:
+                        return Found("class attribute (assigned after class body)", path, n.lineno, None, modname, {"cls": cls.name})
         for n in ast.walk(m[2]):
             if isinstance(n, (ast.Assign, ast.AugAssign, ast.AnnAssign)):
-                for t in (n.targets if isinstance(n, ast.Assign) else [n.target]):
-                    if isinstance(t, ast.Attribute) and isinstance(t.value, ast.Name) and t.value.id == cls.name and t.attr == name:
+                for t in _store_targets(n):
+                    if isinstance(t, ast.Attribute) and isinstance(t.value, ast.Name) and t.value.id in names and t.attr == name:
                         ctx.flags.append(f"{cls.name}.{name} is assigned at line {n.lineno} outside the class body")
             elif isinstance(n, ast.Call):
                 fn = _dotted(n.func)
-                if fn in (["setattr"], ["type", "__setattr__"]) and n.args and isinstance(n.args[0], ast.Name) and n.args[0].id == cls.name:
+                if fn in (["setattr"], ["type", "__setattr__"]) and n.args and isinstance(n.args[0], ast.Name) and n.args[0].id in names:
                     ctx.flags.append(f"setattr on class {cls.name} (members may be added dynamically)")
-    if name in ("__getattr__",):
-        pass
     if "__getattr__" in members or "__getattribute__" in members:
         ctx.flags.append(f"class {cls.name} defines __getattr__ (attributes may be dynamic)")
     if any(k.arg == "metaclass" for k in cls.keywords):
