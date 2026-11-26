@@ -1,0 +1,14 @@
+{
+  "stats": {
+    "correct": 2411,
+    "requests:correct": 956,
+    "click:correct": 713,
+    "instance_attr_unscored": 2,
+    "click:instance_attr_unscored": 1,
+    "flask:correct": 742,
+    "abstained": 442,
+    "flask:abstained": 442,
+    "flask:instance_attr_unscored": 1
+  },
+  "misses": []
+}

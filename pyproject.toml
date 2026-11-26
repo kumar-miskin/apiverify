@@ -1,0 +1,19 @@
+[project]
+name = "apiverify"
+version = "0.1.0"
+description = "Source-backed check of whether a Python API exists in an exact package version. Answers verified, not_found, or cannot_verify."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+dependencies = []
+
+[project.scripts]
+apiverify = "apiverify.cli:main"
+apiverify-mcp = "apiverify.mcp_server:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["apiverify"]
