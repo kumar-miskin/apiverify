@@ -1,0 +1,11 @@
+Partial run (author's own, not independent), batch 2 harness eval/run_eval2.py, 2026-11-26. Per-library, two versions each. 0 false positives, 0 false negatives in every library finished; abstentions are not errors. jinja2 2.11.3 could not be probed (harness import failure), so only jinja2 3.1.4 was scored. Instance attributes unscored.
+httpx {'correct': 750, 'abstained': 100, 'instance_attr_unscored': 2}
+rich {'correct': 10743, 'abstained': 2093, 'instance_attr_unscored': 2}
+packaging {'correct': 1889, 'abstained': 1027}
+attrs {'correct': 314, 'abstained': 148}
+urllib3 {'correct': 2354, 'abstained': 933, 'instance_attr_unscored': 15}
+skip probe jinja2 2.11.3
+jinja2 {'correct': 3148, 'abstained': 614, 'instance_attr_unscored': 1}
+markupsafe {'correct': 196, 'abstained': 24}
+python-dateutil {'correct': 500, 'abstained': 320}
+tqdm {'correct': 1711, 'instance_attr_unscored': 4, 'abstained': 959}

@@ -43,16 +43,28 @@ Exit code: 0 verified, 1 not_found, 2 cannot_verify.
 ## Install
 
 ```
-pip install apiverify        # or: uvx apiverify-mcp   (MCP server)
+pip install apiverify
+uvx --from apiverify apiverify-mcp     # run the MCP server without installing (note: the package is `apiverify`; there is no package named `apiverify-mcp`)
 ```
 
 ## As an MCP server (stdio)
 
 Tool: `verify_python_api` with `symbol`, `version`, optional `package`, `kwargs`.
 
+Run command (any client): `uvx --from apiverify apiverify-mcp`. Pin a version with `apiverify==0.1.2`.
+Needs [uv](https://docs.astral.sh/uv/) installed. Config location and shape differ per client; checked against each client's docs on 2026-11-26:
+
+- Claude Code: `claude mcp add apiverify -- uvx --from apiverify apiverify-mcp`
+- Claude Desktop (`claude_desktop_config.json`) and Cursor (`mcp.json`) both use a top-level `mcpServers` object:
+
 ```json
 { "mcpServers": { "apiverify": { "command": "uvx", "args": ["--from", "apiverify", "apiverify-mcp"] } } }
 ```
+
+- VS Code / Copilot: its config format is changing; use its guided "Add Server" flow, choose "Command (stdio)" and enter the run command above. Not tested by us.
+- Other MCP clients: add a stdio server with that command. Not tested by us.
+
+We have only smoke-tested the server over stdio (initialize + tools/list); we have not run it inside each client above.
 
 (From a clone you can also use `python -m apiverify.mcp_server`.)
 
