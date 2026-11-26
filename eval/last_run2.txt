@@ -9,3 +9,6 @@ jinja2 {'correct': 3148, 'abstained': 614, 'instance_attr_unscored': 1}
 markupsafe {'correct': 196, 'abstained': 24}
 python-dateutil {'correct': 500, 'abstained': 320}
 tqdm {'correct': 1711, 'instance_attr_unscored': 4, 'abstained': 959}
+
+Follow-up (same harness, 2026-11-26 ~06:00): typing-extensions {correct 338, abstained 236}; idna {correct 523, abstained 247}; werkzeug {correct 4594, abstained 1956, instance attrs unscored 38}; starlette {correct 3062, abstained 592, instance attrs unscored 6}. 0 false positives, 0 false negatives. pyparsing not finished (run exceeded time); retry pending.
+Transparency note: the first batch-2 run showed 522 apparent false positives (rich 494, packaging 28). They were harness errors: descriptors such as rich Style.bold and packaging Metadata fields raise on class access but exist. Harness now falls back to inspect.getattr_static; apiverify was not changed.

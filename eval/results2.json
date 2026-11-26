@@ -1,0 +1,11 @@
+{
+  "stats": {
+    "correct": 3062,
+    "starlette:correct": 3062,
+    "abstained": 592,
+    "starlette:abstained": 592,
+    "instance_attr_unscored": 6,
+    "starlette:instance_attr_unscored": 6
+  },
+  "misses": []
+}
