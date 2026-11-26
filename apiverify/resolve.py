@@ -496,7 +496,7 @@ def lookup_class(ctx, modname, is_pkg, cls, rest, depth, seen):
         for n in _flat(m[2].body):
             for t in _store_targets(n):
                 if isinstance(t, ast.Attribute) and isinstance(t.value, ast.Name) and t.value.id in names and t.attr == name and not tail:
-                    if getattr(n, "_cond", False):
+                    if getattr(n, "_cond", False) or isinstance(n, (ast.For, ast.AsyncFor)):
                         ctx.flags.append(f"{cls.name}.{name} is assigned conditionally at line {n.lineno}")
                     elif t.value.id in unstable:
                         ctx.flags.append(f"{cls.name}.{name} is assigned through an unstable alias at line {n.lineno}")
