@@ -1,6 +1,8 @@
 # Distribution status and first-user plan
 
 ## Shipped (verified 2026-11-26)
+v0.1.0 has known incorrect verdicts (see README warning). Do not promote until the fixed release passes independent re-test.
+
 - GitHub (public, MIT): https://github.com/kumar-miskin/apiverify
 - PyPI: https://pypi.org/project/apiverify/0.1.0/  (`pip install apiverify`; MCP: `uvx --from apiverify apiverify-mcp`)
 - Official MCP registry: `io.github.kumar-miskin/apiverify` v0.1.0, status active
