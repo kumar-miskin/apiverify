@@ -1,3 +1,4 @@
+<!-- mcp-name: io.github.kumar-miskin/apiverify -->
 # apiverify
 
 Does this Python API exist in this exact package version? apiverify answers from the
@@ -25,15 +26,21 @@ python -m apiverify.cli PIL.Image.open -v 10.0.0 --package pillow -k mode
 
 Exit code: 0 verified, 1 not_found, 2 cannot_verify.
 
+## Install
+
+```
+pip install apiverify        # or: uvx apiverify-mcp   (MCP server)
+```
+
 ## As an MCP server (stdio)
 
 Tool: `verify_python_api` with `symbol`, `version`, optional `package`, `kwargs`.
 
 ```json
-{ "mcpServers": { "apiverify": { "command": "python", "args": ["-m", "apiverify.mcp_server"] } } }
+{ "mcpServers": { "apiverify": { "command": "uvx", "args": ["--from", "apiverify", "apiverify-mcp"] } } }
 ```
 
-(run from this repo, or after `pip install .` use `apiverify-mcp`.)
+(From a clone you can also use `python -m apiverify.mcp_server`.)
 
 Suggested line for an agent's instructions file (AGENTS.md / CLAUDE.md):
 "Before calling a library API you are not certain exists in the project's pinned
@@ -66,6 +73,6 @@ not scored.
 - Needs network access to pypi.org and files.pythonhosted.org. Artifacts are cached in
   `$APIVERIFY_CACHE`.
 
-## Reaching agents (plan, none of this is published)
+## Reaching agents
 
 See `DISTRIBUTION.md`.

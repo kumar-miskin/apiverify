@@ -1,0 +1,16 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.kumar-miskin/apiverify",
+  "description": "Check if a Python API exists in an exact PyPI version, from its published source. verified, not_found or cannot_verify.",
+  "repository": { "url": "https://github.com/kumar-miskin/apiverify", "source": "github" },
+  "version": "0.1.0",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "apiverify",
+      "version": "0.1.0",
+      "runtimeHint": "uvx",
+      "transport": { "type": "stdio" }
+    }
+  ]
+}
