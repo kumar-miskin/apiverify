@@ -1,7 +1,7 @@
 # Distribution status and first-user plan
 
 ## Shipped (verified 2026-11-26)
-Latest is 0.1.2 (independent retest of its tested static boundary passed; see README for limits). 0.1.0 is marked deprecated in the MCP registry. Do not promote until 0.1.1 passes independent re-test.
+Latest is 0.1.2 (independent retest of its tested static boundary passed; see README for limits). 0.1.0 is marked deprecated in the MCP registry. No reliability or agent-benefit claims are made; see README.
 
 - GitHub (public, MIT): https://github.com/kumar-miskin/apiverify
 - PyPI: https://pypi.org/project/apiverify/0.1.2/  (`pip install apiverify`; MCP: `uvx --from apiverify apiverify-mcp`; if uv reports no matching version right after a release, add `--no-cache`)
