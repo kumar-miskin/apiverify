@@ -138,5 +138,93 @@ class MCP(unittest.TestCase):
         self.assertIn("error", bad)
 
 
+
+class Regressions(unittest.TestCase):
+    """Cases found wrong by the independent evaluation of 0.1.0."""
+    def run1(self, src, sym, **kw):
+        root = tempfile.mkdtemp()
+        os.makedirs(os.path.join(root, "pk"))
+        with open(os.path.join(root, "pk", "__init__.py"), "w") as fh:
+            fh.write(textwrap.dedent(src))
+        _CTXS.clear()
+        return verify_symbol(sym, "1", None, _root=root, **kw)
+
+    def test_object_members_exist(self):
+        for m in ("__repr__", "__eq__", "__hash__", "__dict__", "__doc__", "__class__", "__setattr__"):
+            self.assertEqual(self.run1("class A:\n    pass\n", "pk.A." + m).status, "verified", m)
+
+    def test_plain_missing_still_not_found(self):
+        self.assertEqual(self.run1("class A:\n    pass\n", "pk.A.nope").status, "not_found")
+
+    def test_decorated_class_abstains(self):
+        r = self.run1("import dataclasses\n@dataclasses.dataclass\nclass A:\n    x:int=0\n", "pk.A.fields_x")
+        self.assertEqual(r.status, "cannot_verify")
+
+    def test_assigned_after_class(self):
+        r = self.run1("class A:\n    pass\nA.later = 1\n", "pk.A.later")
+        self.assertEqual(r.status, "verified")
+
+    def test_setattr_on_class_abstains(self):
+        r = self.run1("class A:\n    pass\nsetattr(A, 'x', 1)\n", "pk.A.y")
+        self.assertEqual(r.status, "cannot_verify")
+
+    def test_dynamic_module_names_abstain(self):
+        for src in ("globals().update({'zz': 1})\n", "exec('def zz(): pass')\n", "for n in 'ab':\n    globals()[n] = 1\n"):
+            self.assertEqual(self.run1(src, "pk.zz").status, "cannot_verify", src)
+
+    def test_type_checking_only_not_verified(self):
+        r = self.run1("from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    from os import path as Thing\n", "pk.Thing")
+        self.assertEqual(r.status, "cannot_verify")
+
+    def test_deleted_name_not_verified(self):
+        r = self.run1("def helper(): pass\ndel helper\n", "pk.helper")
+        self.assertEqual(r.status, "cannot_verify")
+
+    def test_version_conditional_not_verified(self):
+        r = self.run1("import sys\nif sys.version_info < (3, 0):\n    def old(): pass\n", "pk.old")
+        self.assertEqual(r.status, "cannot_verify")
+
+    def test_defined_in_both_branches_is_verified(self):
+        src = "import sys\nif sys.version_info >= (3, 8):\n    def f(): pass\nelse:\n    def f(): pass\n"
+        self.assertEqual(self.run1(src, "pk.f").status, "verified")
+
+    def test_overload_kwarg_uses_implementation(self):
+        src = ("from typing import overload\n@overload\ndef f(a: int) -> int: ...\n@overload\n"
+               "def f(a: int, *, b: int) -> int: ...\ndef f(a, *, b=0): return a\n")
+        r = self.run1(src, "pk.f", kwargs=["b"])
+        self.assertEqual(r.params["b"], "accepted")
+
+    def test_overload_only_stubs_abstain_on_kwargs(self):
+        src = "from typing import overload\n@overload\ndef f(a: int) -> int: ...\n"
+        r = self.run1(src, "pk.f", kwargs=["a"])
+        self.assertTrue(r.params["a"].startswith("cannot_verify"))
+
+    def test_kwargs_string_and_bad_input(self):
+        r = self.run1("def f(abc): pass\n", "pk.f", kwargs="abc")
+        self.assertEqual(r.params, {"abc": "accepted"})
+        r = verify_symbol("requests.get", "../requests/2.31.0")
+        self.assertEqual(r.status, "cannot_verify")
+
+    def test_zip_bomb_is_not_unpacked(self):
+        import io, zipfile
+        from apiverify.fetch import _safe_extract_zip, MAX_MEMBER, FetchError
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+            z.writestr("b/__init__.py", "x=1\n")
+            z.writestr("b/big.bin", b"\0" * (20 * 1024 * 1024))
+            z.writestr("b/huge.py", b"#" * (MAX_MEMBER + 10))
+        d = tempfile.mkdtemp()
+        with self.assertRaises(FetchError):
+            _safe_extract_zip(zipfile.ZipFile(buf), d)
+        self.assertFalse(os.path.exists(os.path.join(d, "b", "big.bin")))
+
+    def test_mcp_missing_symbol_is_clean_error(self):
+        r = mcp_server.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                               "params": {"name": "verify_python_api", "arguments": {"version": "1"}}})
+        txt = r["result"]["content"][0]["text"]
+        self.assertIn("symbol", txt)
+        self.assertNotIn("KeyError", txt)
+
+
 if __name__ == "__main__":
     unittest.main()

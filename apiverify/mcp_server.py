@@ -30,7 +30,7 @@ def handle(msg):
     m, i = msg.get("method"), msg.get("id")
     if m == "initialize":
         return {"jsonrpc": "2.0", "id": i, "result": {"protocolVersion": PROTOCOL, "capabilities": {"tools": {}},
-                "serverInfo": {"name": "apiverify", "version": "0.1.0"}}}
+                "serverInfo": {"name": "apiverify", "version": "0.1.1"}}}
     if m == "tools/list":
         return {"jsonrpc": "2.0", "id": i, "result": {"tools": [TOOL]}}
     if m == "tools/call":
@@ -39,8 +39,11 @@ def handle(msg):
             return {"jsonrpc": "2.0", "id": i, "error": {"code": -32602, "message": "unknown tool"}}
         a = p.get("arguments") or {}
         try:
-            r = verify_symbol(a["symbol"], a.get("version", "latest"), a.get("package"), a.get("kwargs"))
-            out, err = r.to_dict(), False
+            if not isinstance(a.get("symbol"), str) or not a.get("symbol"):
+                out, err = {"status": "cannot_verify", "reason": "argument 'symbol' (string) is required"}, True
+            else:
+                r = verify_symbol(a["symbol"], a.get("version", "latest"), a.get("package"), a.get("kwargs"))
+                out, err = r.to_dict(), False
         except Exception as e:  # never crash the server
             out, err = {"status": "cannot_verify", "reason": f"internal error: {e.__class__.__name__}"}, True
         return {"jsonrpc": "2.0", "id": i, "result": {"content": [{"type": "text", "text": json.dumps(out, indent=2)}], "isError": err}}

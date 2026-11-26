@@ -12,12 +12,14 @@ A "not_found" is only returned when no unresolved escape hatch exists.
 import ast
 import builtins
 import os
+import re
 from dataclasses import dataclass, field, asdict
 from typing import Optional
 
 from .fetch import fetch_source, FetchError
 
 MAX_DEPTH = 12
+MAX_PARSE_BYTES = 3 * 1024 * 1024
 _WRAP_OK = {"staticmethod", "classmethod", "property", "overload", "abstractmethod",
             "cached_property", "functools.cached_property", "typing.overload",
             "abc.abstractmethod", "override", "typing.override"}
@@ -74,6 +76,8 @@ class Ctx:
         res = None
         if path:
             try:
+                if os.path.getsize(path) > MAX_PARSE_BYTES:
+                    raise ValueError("file too large")
                 with open(path, "rb") as fh:
                     res = (path, is_pkg, ast.parse(fh.read(), filename=path))
             except (SyntaxError, ValueError) as e:
@@ -82,18 +86,72 @@ class Ctx:
         return res
 
 
-def _flat(body):
-    """Statements at this scope, descending into if/try/with but not defs."""
+def _is_tc(test):
+    try:
+        t = ast.unparse(test)
+    except Exception:
+        return False
+    return t == "TYPE_CHECKING" or t.endswith(".TYPE_CHECKING")
+
+
+def _is_not_tc(test):
+    return isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not) and _is_tc(test.operand)
+
+
+def _bound_names(body):
+    """Names a statement list binds at its own scope (used to tell if both branches of an if define a name)."""
+    out = set()
     for n in body:
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            out.add(n.name)
+        elif isinstance(n, (ast.Import, ast.ImportFrom)):
+            for a in n.names:
+                out.add("*" if a.name == "*" else (a.asname or a.name.split(".")[0]))
+        elif isinstance(n, (ast.If, ast.Try, ast.With)):
+            out |= _bound_names(n.body) | _bound_names(getattr(n, "orelse", []))
+            if isinstance(n, ast.Try):
+                out |= _bound_names(n.finalbody)
+                for h in n.handlers:
+                    out |= _bound_names(h.body)
+        else:
+            out |= set(_targets(n))
+    return out
+
+
+def _flat(body, cond=False):
+    """Statements at this scope, descending into if/try/with but not defs.
+    Each yielded node gets ._cond = True when it only runs under a condition that
+    the other branch does not also cover (version, platform, feature checks).
+    Bodies guarded by TYPE_CHECKING never run at runtime and are skipped."""
+    for n in body:
+        n._cond = cond
         yield n
         if isinstance(n, ast.If):
-            yield from _flat(n.body); yield from _flat(n.orelse)
+            if _is_tc(n.test):
+                yield from _flat(n.orelse, cond)
+            elif _is_not_tc(n.test):
+                yield from _flat(n.body, cond)
+            else:
+                for branch, other in ((n.body, n.orelse), (n.orelse, n.body)):
+                    ob = _bound_names(other)
+                    for c in branch:
+                        nm = _bound_names([c]) if not isinstance(c, (ast.If, ast.Try, ast.With)) else set()
+                        covered = bool(nm) and "*" not in nm and nm <= ob
+                        yield from _flat([c], cond or not covered)
         elif isinstance(n, ast.Try):
-            yield from _flat(n.body); yield from _flat(n.orelse); yield from _flat(n.finalbody)
+            yield from _flat(n.body, cond); yield from _flat(n.orelse, cond); yield from _flat(n.finalbody, cond)
             for h in n.handlers:
-                yield from _flat(h.body)
+                yield from _flat(h.body, cond)
         elif isinstance(n, (ast.With,)):
-            yield from _flat(n.body)
+            yield from _flat(n.body, cond)
+
+
+def _is_overload(n):
+    for d in getattr(n, "decorator_list", []):
+        dd = _dotted(d.func if isinstance(d, ast.Call) else d) or []
+        if dd and dd[-1] == "overload":
+            return True
+    return False
 
 
 def _targets(n):
@@ -145,7 +203,23 @@ def lookup_module(ctx, modname, rest, depth=0, seen=None):
         return Found("module", path, 1, tree, modname)
     name, tail = rest[0], rest[1:]
     unknown = []
-    for n in _flat(tree.body):
+    overloads = []
+    flat = list(_flat(tree.body))
+    for n in flat:
+        if isinstance(n, ast.Delete) and any(isinstance(t, ast.Name) and t.id == name for t in n.targets):
+            ctx.flags.append(f"{name} is deleted with del at line {n.lineno} in {modname}")
+            return None
+    for n in tree.body:
+        if isinstance(n, ast.If) and _is_tc(n.test) and name in _bound_names(n.body):
+            unknown.append(f"{name} is only defined under TYPE_CHECKING (not present at runtime)")
+    for n in flat:
+        if getattr(n, "_cond", False) and not isinstance(n, (ast.If, ast.Try, ast.With)) \
+                and (name in _bound_names([n]) or "*" in _bound_names([n])):
+            unknown.append(f"{name} is defined only under a condition at line {n.lineno} (version, platform or feature check)")
+            continue
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == name and _is_overload(n):
+            overloads.append(n)
+            continue
         if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == name:
             if tail:
                 unknown.append(f"{name} is a function; attribute {tail[0]} cannot be checked statically")
@@ -223,34 +297,59 @@ def lookup_module(ctx, modname, rest, depth=0, seen=None):
         r = lookup_module(ctx, f"{modname}.{name}", tail, depth + 1, seen)
         if r is not None:
             return r
-    for n in _flat(tree.body):
+    if overloads:
+        return Found("function", path, overloads[0].lineno, overloads[0], modname, {"overload_only": True})
+    for n in flat:
         if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == "__getattr__":
             unknown.append(f"{modname} defines module-level __getattr__ (names may be created lazily)")
-        if isinstance(n, ast.Expr) and isinstance(n.value, ast.Call):
-            fn = _dotted(n.value.func)
-            if fn and fn[-1] in ("setattr",) or (fn and fn[:1] == ["globals"]):
-                unknown.append(f"{modname} sets names dynamically")
     for n in ast.walk(tree):
-        if isinstance(n, ast.Subscript) and isinstance(n.value, ast.Call):
-            fn = _dotted(n.value.func)
-            if fn == ["globals"] and isinstance(n.ctx, ast.Store):
-                unknown.append(f"{modname} writes to globals()")
+        if isinstance(n, ast.Call):
+            fn = _dotted(n.func)
+            if fn and fn[-1] in ("exec", "eval", "globals", "__import__") and len(fn) == 1:
+                unknown.append(f"{modname} uses {fn[-1]}() (names may be created dynamically)")
+            elif fn == ["setattr"] and n.args and isinstance(n.args[0], (ast.Name, ast.Subscript)):
+                a0 = n.args[0]
+                if isinstance(a0, ast.Subscript) or a0.id in ("__builtins__",):
+                    unknown.append(f"{modname} calls setattr on a module")
+        elif isinstance(n, ast.Subscript):
+            d = _dotted(n.value)
+            if d == ["sys", "modules"] or d == ["globals"]:
+                if isinstance(n.ctx, ast.Store):
+                    unknown.append(f"{modname} writes to sys.modules or globals()")
     if unknown:
         ctx.flags.extend(unknown)
     return None
 
 
 def _class_members(cls):
-    out = {}
+    out, cond, deleted = {}, set(), set()
     for n in _flat(cls.body):
+        if isinstance(n, ast.Delete):
+            for t in n.targets:
+                if isinstance(t, ast.Name):
+                    deleted.add(t.id)
+            continue
+        if isinstance(n, (ast.If, ast.Try, ast.With)):
+            continue
+        names = _bound_names([n])
+        if getattr(n, "_cond", False):
+            cond |= names
+            continue
         if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if _is_overload(n) and n.name in out:
+                continue
             out[n.name] = ("function", n)
         elif isinstance(n, ast.ClassDef):
             out[n.name] = ("class", n)
         else:
             for t in _targets(n):
                 out[t] = ("variable", n)
-    return out
+    return out, cond, deleted
+
+
+_OBJECT_MEMBERS = set(dir(object)) | {"__dict__", "__module__", "__weakref__", "__qualname__", "__name__",
+                                      "__mro__", "__bases__", "__subclasses__", "__annotations__"}
+_HARMLESS_CLASS_DECORATORS = {"final", "runtime_checkable", "type_check_only"}
 
 
 def _instance_attrs(cls):
@@ -272,8 +371,11 @@ def _instance_attrs(cls):
 def lookup_class(ctx, modname, is_pkg, cls, rest, depth, seen):
     name, tail = rest[0], rest[1:]
     path = ctx.load(modname)[0]
-    members = _class_members(cls)
-    if name in members:
+    members, condmem, deleted = _class_members(cls)
+    if name in deleted:
+        ctx.flags.append(f"{name} is deleted in class {cls.name}")
+        return None
+    if name in members and name not in condmem:
         kind, node = members[name]
         if tail:
             if kind == "class":
@@ -290,6 +392,29 @@ def lookup_class(ctx, modname, is_pkg, cls, rest, depth, seen):
     ia = _instance_attrs(cls)
     if name in ia and not tail:
         return Found("instance attribute", path, ia[name], None, modname, {"cls": cls.name})
+    if not tail and name in _OBJECT_MEMBERS:
+        return Found("member inherited from object", path, cls.lineno, None, modname, {"cls": cls.name})
+    if name in condmem:
+        ctx.flags.append(f"{name} is defined in class {cls.name} only under a condition (version, platform or feature check)")
+    for d in cls.decorator_list:
+        dd = _dotted(d.func if isinstance(d, ast.Call) else d) or ["?"]
+        if dd[-1] not in _HARMLESS_CLASS_DECORATORS:
+            ctx.flags.append(f"class {cls.name} has decorator @{'.'.join(dd)} which may generate members")
+    m = ctx.load(modname)
+    if m is not None:
+        for n in _flat(m[2].body):
+            for t in ([n.target] if isinstance(n, (ast.AnnAssign, ast.AugAssign)) else (n.targets if isinstance(n, ast.Assign) else [])):
+                if isinstance(t, ast.Attribute) and isinstance(t.value, ast.Name) and t.value.id == cls.name and t.attr == name and not tail:
+                    return Found("class attribute (assigned after class body)", path, n.lineno, None, modname, {"cls": cls.name})
+        for n in ast.walk(m[2]):
+            if isinstance(n, (ast.Assign, ast.AugAssign, ast.AnnAssign)):
+                for t in (n.targets if isinstance(n, ast.Assign) else [n.target]):
+                    if isinstance(t, ast.Attribute) and isinstance(t.value, ast.Name) and t.value.id == cls.name and t.attr == name:
+                        ctx.flags.append(f"{cls.name}.{name} is assigned at line {n.lineno} outside the class body")
+            elif isinstance(n, ast.Call):
+                fn = _dotted(n.func)
+                if fn in (["setattr"], ["type", "__setattr__"]) and n.args and isinstance(n.args[0], ast.Name) and n.args[0].id == cls.name:
+                    ctx.flags.append(f"setattr on class {cls.name} (members may be added dynamically)")
     if name in ("__getattr__",):
         pass
     if "__getattr__" in members or "__getattribute__" in members:
@@ -358,6 +483,8 @@ def _deprecation(node):
 def _param_status(node, kwargs, ctx, found):
     if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
         return {k: "cannot_verify" for k in kwargs}
+    if _is_overload(node):
+        return {k: "cannot_verify (only @overload stubs found)" for k in kwargs}
     a = node.args
     named = {x.arg for x in a.args + a.kwonlyargs}
     altered = False
@@ -379,13 +506,23 @@ def _param_status(node, kwargs, ctx, found):
 
 
 _CTXS = {}
+_PKG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+_VER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+!-]*$")
 
 
 def verify_symbol(symbol, version="latest", package=None, kwargs=None, _root=None):
-    top = symbol.split(".")[0]
+    top = symbol.split(".")[0] if isinstance(symbol, str) else ""
     package = package or top
     res = Result(status="cannot_verify", package=package, version=version, symbol=symbol)
-    if not symbol or any(not p.isidentifier() for p in symbol.split(".")):
+    if isinstance(kwargs, str):
+        kwargs = [kwargs]
+    if kwargs is not None and not (isinstance(kwargs, (list, tuple)) and all(isinstance(k, str) for k in kwargs)):
+        res.reason = "kwargs must be a list of strings"
+        return res
+    if not isinstance(symbol, str) or not _PKG_RE.match(package or "") or not (version in (None, "latest") or _VER_RE.match(str(version))):
+        res.reason = "invalid symbol, package or version"
+        return res
+    if not symbol or not isinstance(symbol, str) or any(not p.isidentifier() for p in symbol.split(".")):
         res.reason = "symbol must be a dotted Python path like requests.Session.get"
         return res
     try:

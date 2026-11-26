@@ -1,6 +1,6 @@
 [project]
 name = "apiverify"
-version = "0.1.0"
+version = "0.1.1"
 description = "Source-backed check of whether a Python API exists in an exact package version. Answers verified, not_found, or cannot_verify."
 readme = "README.md"
 requires-python = ">=3.9"

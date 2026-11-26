@@ -54,24 +54,65 @@ def _pick_file(files):
     return None
 
 
-def _safe_extract_zip(zf, dest):
+MAX_UNPACKED = 100 * 1024 * 1024   # total bytes of .py/.pyi written
+MAX_MEMBER = 8 * 1024 * 1024       # per file
+MAX_FILES = 40000
+
+
+def _dest_path(dest, name):
     base = os.path.realpath(dest)
-    for m in zf.namelist():
-        p = os.path.realpath(os.path.join(dest, m))
-        if not p.startswith(base + os.sep) and p != base:
-            raise FetchError("unsafe path in archive")
-    zf.extractall(dest)
+    p = os.path.realpath(os.path.join(dest, name))
+    if not p.startswith(base + os.sep):
+        raise FetchError("unsafe path in archive")
+    return p
+
+
+def _copy_limited(src, out_path, budget):
+    """Copy at most MAX_MEMBER bytes, counting real decompressed bytes (not declared sizes)."""
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    n = 0
+    with open(out_path, "wb") as out:
+        while True:
+            chunk = src.read(65536)
+            if not chunk:
+                break
+            n += len(chunk)
+            if n > MAX_MEMBER or n > budget:
+                raise FetchError("archive member too large when unpacked; refusing")
+            out.write(chunk)
+    return n
+
+
+def _wanted(name):
+    return name.endswith((".py", ".pyi")) and not name.endswith("/")
+
+
+def _safe_extract_zip(zf, dest):
+    total = files = 0
+    for info in zf.infolist():
+        if info.is_dir() or not _wanted(info.filename):
+            continue
+        files += 1
+        if files > MAX_FILES:
+            raise FetchError("too many files in archive")
+        out = _dest_path(dest, info.filename)
+        with zf.open(info) as src:
+            total += _copy_limited(src, out, MAX_UNPACKED - total)
 
 
 def _safe_extract_tar(tf, dest):
-    base = os.path.realpath(dest)
-    for m in tf.getmembers():
-        p = os.path.realpath(os.path.join(dest, m.name))
-        if not p.startswith(base + os.sep) and p != base:
-            raise FetchError("unsafe path in archive")
-        if m.issym() or m.islnk() or m.isdev():
+    total = files = 0
+    for m in tf:
+        if not m.isreg() or not _wanted(m.name):
             continue
-        tf.extract(m, dest)
+        files += 1
+        if files > MAX_FILES:
+            raise FetchError("too many files in archive")
+        out = _dest_path(dest, m.name)
+        src = tf.extractfile(m)
+        if src is None:
+            continue
+        total += _copy_limited(src, out, MAX_UNPACKED - total)
 
 
 _MEMO = {}
