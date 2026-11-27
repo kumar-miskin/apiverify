@@ -70,6 +70,8 @@ CASES = {
  "cond_class_attr_alias": ("class A: pass\nif True:\n    A.c1 = 1\n", ["A.c1"]),
  "reexport_chain": ("from .sub import pub as pp\nfrom . import sub as ss\n", ["pp", "ss", "ss.pub", "ss.hidden", "ss.zz"]),
  "init_subclass": ("class A:\n    def __init_subclass__(cls, **k):\n        cls.made = 1\nclass B(A): pass\n", ["B.made", "A.made"]),
+ "class_global": ("class A:\n    global gx\n    gx = 1\n    other = 2\n", ["A.gx", "gx", "A.other"]),
+ "class_global_nested": ("class A:\n    if True:\n        global gy\n        gy = 1\n", ["A.gy", "gy"]),
  "class_dict_update": ("class A: pass\nA.__dict__\nvars(A)\nA.attr_x = 1\n", ["A.attr_x", "A.attr_y"]),
 }
 SUB = "pub = 1\n_priv = 2\n__all__ = ['pub']\nhidden = 3\n"

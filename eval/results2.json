@@ -1,10 +1,21 @@
 {
   "stats": {
-    "correct": 3062,
-    "starlette:correct": 3062,
-    "abstained": 592,
-    "starlette:abstained": 592,
-    "instance_attr_unscored": 6,
+    "correct": 20789,
+    "httpx:correct": 750,
+    "abstained": 6017,
+    "httpx:abstained": 100,
+    "instance_attr_unscored": 48,
+    "httpx:instance_attr_unscored": 2,
+    "rich:correct": 10526,
+    "rich:abstained": 2310,
+    "rich:instance_attr_unscored": 2,
+    "packaging:correct": 1889,
+    "packaging:abstained": 1027,
+    "werkzeug:correct": 4579,
+    "werkzeug:instance_attr_unscored": 38,
+    "werkzeug:abstained": 1971,
+    "starlette:correct": 3045,
+    "starlette:abstained": 609,
     "starlette:instance_attr_unscored": 6
   },
   "misses": []

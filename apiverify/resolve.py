@@ -548,6 +548,18 @@ def lookup_class(ctx, modname, is_pkg, cls, rest, depth, seen):
     name, tail = rest[0], rest[1:]
     path = ctx.load(modname)[0]
     members, condmem, deleted = _class_members(cls)
+    gl = set()
+    stack = list(cls.body)
+    while stack:
+        g = stack.pop()
+        if isinstance(g, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            continue
+        if isinstance(g, (ast.Global, ast.Nonlocal)):
+            gl |= set(g.names)
+        stack.extend(ast.iter_child_nodes(g))
+    if name in gl:
+        ctx.flags.append(f"{name} is declared global in the body of class {cls.name}, so assignments bind a module name, not a class attribute")
+        return None
     if name in deleted:
         ctx.flags.append(f"{name} is deleted in class {cls.name}")
         return None
