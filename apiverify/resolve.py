@@ -139,9 +139,23 @@ def _flat(body, cond=False):
                         covered = bool(nm) and "*" not in nm and nm <= ob
                         yield from _flat([c], cond or not covered)
         elif isinstance(n, ast.Try):
-            yield from _flat(n.body, cond); yield from _flat(n.orelse, cond); yield from _flat(n.finalbody, cond)
-            for h in n.handlers:
-                yield from _flat(h.body, cond)
+            if n.handlers:
+                hb = [_bound_names(h.body) for h in n.handlers]
+                all_h = set.intersection(*hb) if hb else set()
+                body_b = _bound_names(n.body) | _bound_names(n.orelse)
+                for part, covered_by in ((n.body, all_h), (n.orelse, all_h)):
+                    for c in part:
+                        nm = _bound_names([c]) if not isinstance(c, (ast.If, ast.Try, ast.With)) else set()
+                        covered = bool(nm) and "*" not in nm and nm <= covered_by
+                        yield from _flat([c], cond or not covered)
+                for h in n.handlers:
+                    for c in h.body:
+                        nm = _bound_names([c]) if not isinstance(c, (ast.If, ast.Try, ast.With)) else set()
+                        covered = bool(nm) and "*" not in nm and nm <= body_b
+                        yield from _flat([c], cond or not covered)
+            else:
+                yield from _flat(n.body, cond); yield from _flat(n.orelse, cond)
+            yield from _flat(n.finalbody, cond)
         elif isinstance(n, (ast.With,)):
             yield from _flat(n.body, cond)
 
@@ -154,17 +168,90 @@ def _is_overload(n):
     return False
 
 
+def _target_names(t):
+    if isinstance(t, ast.Name):
+        yield t.id
+    elif isinstance(t, (ast.Tuple, ast.List)):
+        for e in t.elts:
+            yield from _target_names(e)
+    elif isinstance(t, ast.Starred):
+        yield from _target_names(t.value)
+
+
 def _targets(n):
     if isinstance(n, ast.Assign):
         for t in n.targets:
-            if isinstance(t, ast.Name):
-                yield t.id
-            elif isinstance(t, (ast.Tuple, ast.List)):
-                for e in t.elts:
-                    if isinstance(e, ast.Name):
-                        yield e.id
-    elif isinstance(n, (ast.AnnAssign, ast.AugAssign)) and isinstance(n.target, ast.Name):
+            yield from _target_names(t)
+    elif isinstance(n, ast.AnnAssign) and n.value is not None and isinstance(n.target, ast.Name):
+        yield n.target.id     # `x: int` alone assigns nothing
+    elif isinstance(n, ast.AugAssign) and isinstance(n.target, ast.Name):
         yield n.target.id
+
+
+def _annotated_only(body, name):
+    return any(isinstance(n, ast.AnnAssign) and n.value is None and isinstance(n.target, ast.Name) and n.target.id == name
+               for n in _flat(body))
+
+
+def _star_exports(tree):
+    """None: no __all__ (names not starting with _ are exported). set: literal __all__. 'dynamic': cannot tell."""
+    out = None
+    for n in ast.walk(tree):
+        names = []
+        if isinstance(n, ast.Assign):
+            names = [t for t in n.targets if isinstance(t, ast.Name) and t.id == "__all__"]
+            val = n.value
+        elif isinstance(n, (ast.AugAssign, ast.AnnAssign)) and isinstance(n.target, ast.Name) and n.target.id == "__all__":
+            names = [n.target]; val = getattr(n, "value", None)
+            if isinstance(n, ast.AugAssign):
+                return "dynamic"
+        else:
+            continue
+        if not names:
+            continue
+        try:
+            v = ast.literal_eval(val)
+            if not isinstance(v, (list, tuple)) or not all(isinstance(x, str) for x in v):
+                return "dynamic"
+            out = set(v) if out is None else out | set(v)
+        except Exception:
+            return "dynamic"
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Call):
+            d = _dotted(n.func)
+            if d and len(d) == 2 and d[0] == "__all__":
+                return "dynamic"
+    return out
+
+
+def _scope_binds(body):
+    """Every name bound anywhere in this scope's statements (loops, with, match, except, walrus, nested blocks),
+    not descending into nested function or class bodies. Used as a conservative last check: a name found
+    here that normal resolution did not settle is reported as cannot_verify."""
+    out = {}
+    stack = list(body)
+    while stack:
+        n = stack.pop()
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            out.setdefault(n.name, n.lineno)
+            for d in n.decorator_list:
+                stack.append(d)
+            continue
+        if isinstance(n, ast.Lambda):
+            continue
+        if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store):
+            out.setdefault(n.id, n.lineno)
+        elif isinstance(n, (ast.Import, ast.ImportFrom)):
+            for a in n.names:
+                out.setdefault("*" if a.name == "*" else (a.asname or a.name.split(".")[0]), n.lineno)
+        elif isinstance(n, ast.ExceptHandler) and n.name:
+            out.setdefault(n.name, n.lineno)
+        elif isinstance(n, (ast.MatchAs, ast.MatchStar)) and n.name:
+            out.setdefault(n.name, n.lineno)
+        elif isinstance(n, ast.MatchMapping) and n.rest:
+            out.setdefault(n.rest, n.lineno)
+        stack.extend(ast.iter_child_nodes(n))
+    return out
 
 
 def _dotted(node):
@@ -256,6 +343,14 @@ def lookup_module(ctx, modname, rest, depth=0, seen=None):
                 if a.name == "*":
                     if target is None:
                         continue
+                    tm = ctx.load(target)
+                    if tm is not None:
+                        ex = _star_exports(tm[2])
+                        if ex == "dynamic":
+                            unknown.append(f"star import from {target}, whose __all__ is not a plain literal list")
+                            continue
+                        if (ex is not None and name not in ex) or (ex is None and name.startswith("_")):
+                            continue
                     try:
                         r = lookup_module(ctx, target, rest, depth + 1, seen)
                         if r is not None:
@@ -302,6 +397,18 @@ def lookup_module(ctx, modname, rest, depth=0, seen=None):
             return r
     if overloads:
         return Found("function", path, overloads[0].lineno, overloads[0], modname, {"overload_only": True})
+    if _annotated_only(tree.body, name):
+        unknown.append(f"{name} is annotated but never assigned in {modname}")
+    sb = _scope_binds(tree.body)
+    handled = set().union(*[_bound_names([n]) for n in flat if not isinstance(n, (ast.If, ast.Try, ast.With))]) if flat else set()
+    if name in sb and name not in handled:
+        unknown.append(f"{name} is bound at line {sb[name]} of {modname} by a construct this checker does not follow (loop, with, match, except or similar)")
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Global) and name in n.names:
+            unknown.append(f"{name} is declared global inside a function in {modname} (may be created when it runs)")
+    for n in ast.walk(tree):
+        if isinstance(n, ast.NamedExpr) and isinstance(n.target, ast.Name) and n.target.id == name:
+            unknown.append(f"{name} is bound by an assignment expression at line {n.lineno} in {modname}")
     for n in flat:
         if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == "__getattr__":
             unknown.append(f"{modname} defines module-level __getattr__ (names may be created lazily)")
@@ -482,6 +589,19 @@ def lookup_class(ctx, modname, is_pkg, cls, rest, depth, seen):
         return Found("instance attribute", path, ia[name], None, modname, {"cls": cls.name})
     if not tail and name in _OBJECT_MEMBERS:
         return Found("member inherited from object", path, cls.lineno, None, modname, {"cls": cls.name})
+    if not tail and name in dir(type):
+        return Found("member inherited from type (available on the class itself)", path, cls.lineno, None, modname, {"cls": cls.name})
+    if _annotated_only(cls.body, name):
+        ctx.flags.append(f"{name} is annotated but never assigned in class {cls.name} (not a class attribute at runtime)")
+    sb = _scope_binds(cls.body)
+    handled = set().union(*[_bound_names([n]) for n in _flat(cls.body) if not isinstance(n, (ast.If, ast.Try, ast.With))]) if cls.body else set()
+    if name in sb and name not in handled:
+        ctx.flags.append(f"{name} is bound at line {sb[name]} in class {cls.name} by a construct this checker does not follow (loop, with, match, try or similar)")
+    if mm is not None:
+        for n in ast.walk(mm[2]):
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == "__init_subclass__":
+                ctx.flags.append(f"{modname} defines __init_subclass__ (subclasses may gain members when created)")
+                break
     if name in condmem:
         ctx.flags.append(f"{name} is defined in class {cls.name} only under a condition (version, platform or feature check)")
     for d in cls.decorator_list:

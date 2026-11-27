@@ -14,6 +14,8 @@
 > `.py`/`.pyi`, 100 MB total, 8 MB per file) and validates inputs. Expect many `cannot_verify` answers
 > (the evaluation saw 46% abstention on lazily loaded or re-exporting libraries such as pydantic 2).
 > Monkeypatching from a different module cannot be seen. Do not treat this as proven reliable.
+>
+> **Known issue in the published 0.1.2:** our own adversarial runtime check found wrong answers on a few constructs (names bound in loops, `with`/`match`/`:=`, nested tuple unpacking, `try` bodies, star-import filtering, annotation-only names). They are fixed on `main` (see CHANGELOG.md) and not yet released.
 
 Does this Python API exist in this exact package version? apiverify answers from the
 published source of that version, not from docs or model memory.
