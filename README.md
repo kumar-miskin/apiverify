@@ -15,7 +15,7 @@
 > (the evaluation saw 46% abstention on lazily loaded or re-exporting libraries such as pydantic 2).
 > Monkeypatching from a different module cannot be seen. Do not treat this as proven reliable.
 >
-> **Known issue in the published 0.1.2:** our own adversarial runtime check found wrong answers on a few constructs (names bound in loops, `with`/`match`/`:=`, nested tuple unpacking, `try` bodies, star-import filtering, annotation-only names). They are fixed on `main` (see CHANGELOG.md) and not yet released.
+> **Known issue in 0.1.2 (fixed in 0.1.3):** our own adversarial runtime check found wrong answers on a few constructs (names bound in loops, `with`/`match`/`:=`, nested tuple unpacking, `try` bodies, star-import filtering, annotation-only names, `global` in a class body). Use 0.1.3 or later; see CHANGELOG.md. The 0.1.3 fixes were checked by an independent evaluator on synthetic cases (0 wrong of 86 probes); that is not proof of reliability.
 
 Does this Python API exist in this exact package version? apiverify answers from the
 published source of that version, not from docs or model memory.
@@ -55,7 +55,7 @@ uvx --from apiverify apiverify-mcp     # run the MCP server without installing (
 
 Tool: `verify_python_api` with `symbol`, `version`, optional `package`, `kwargs`.
 
-Run command (any client): `uvx --from apiverify apiverify-mcp`. Pin a version with `apiverify==0.1.2`.
+Run command (any client): `uvx --from apiverify apiverify-mcp`. Pin a version with `apiverify==0.1.3`.
 Needs [uv](https://docs.astral.sh/uv/) installed. Config location and shape differ per client; checked against each client's docs on 2026-11-26:
 
 - Claude Code: `claude mcp add apiverify -- uvx --from apiverify apiverify-mcp`

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased (after 0.1.2; not on PyPI yet)
+## 0.1.3
 Found by `eval/adversarial.py`, which imports small synthetic packages and compares apiverify with Python itself. 0.1.2 gave wrong decisive answers on these constructs, all now fixed with regression coverage (`tests/test_adversarial.py`):
 - `verified` for a name defined in a `try:` body that only runs if the import before it works (try bodies are now conditional unless every handler also binds the name).
 - `not_found` for names bound by an assignment expression (`:=`), nested tuple unpacking (`a, (b, c) = ...`), `for`/`while` bodies, `with ... as`, `except ... as`, `match` captures, `global` in a function, and class-body loops/walrus.

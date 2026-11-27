@@ -30,7 +30,7 @@ def handle(msg):
     m, i = msg.get("method"), msg.get("id")
     if m == "initialize":
         return {"jsonrpc": "2.0", "id": i, "result": {"protocolVersion": PROTOCOL, "capabilities": {"tools": {}},
-                "serverInfo": {"name": "apiverify", "version": "0.1.2"}}}
+                "serverInfo": {"name": "apiverify", "version": "0.1.3"}}}
     if m == "tools/list":
         return {"jsonrpc": "2.0", "id": i, "result": {"tools": [TOOL]}}
     if m == "tools/call":
